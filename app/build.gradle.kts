@@ -12,8 +12,11 @@ android {
         applicationId = "com.reparto.pisos"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // En GitHub Actions cada compilación sube el número de versión, para que Android
+        // siempre la acepte como actualización de la anterior.
+        val run = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = run
+        versionName = "1.0.$run"
     }
 
     // Clave de firma fija (solo para uso personal): así cada APK nuevo se instala
