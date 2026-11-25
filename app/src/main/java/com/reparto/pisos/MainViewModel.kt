@@ -139,7 +139,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveSettings(key: String, model: String, useAi: Boolean, topIsHighest: Boolean, bottomFloor: Int) {
-        this.apiKey = key.trim()
+        this.apiKey = AiClient.cleanKey(key)
         this.model = model.trim().ifEmpty { DEFAULT_MODEL }
         this.useAi = useAi
         this.topIsHighest = topIsHighest
@@ -176,6 +176,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 var aiError: String? = null
                 if (useAi && apiKey.isNotBlank()) {
                     try {
+                        AiClient.keyProblem(apiKey)?.let { throw java.io.IOException(it) }
                         status = "Leyendo el timbre con la IA… (20-60 s)"
                         val (res, entries) = runAi(parcels, paths)
                         results = res

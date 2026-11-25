@@ -51,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,7 +70,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -349,6 +352,9 @@ fun SettingsDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var useAi by remember { mutableStateOf(vm.useAi) }
     var topIsHighest by remember { mutableStateOf(vm.topIsHighest) }
     var bottomFloor by remember { mutableStateOf(vm.bottomFloor) }
+    val scope = rememberCoroutineScope()
+    var testing by remember { mutableStateOf(false) }
+    var testMsg by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -377,6 +383,38 @@ fun SettingsDialog(vm: MainViewModel, onDismiss: () -> Unit) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                val cleaned = AiClient.cleanKey(key)
+                if (cleaned.isNotEmpty()) {
+                    Text(
+                        "Pegada: ${cleaned.length} caracteres · empieza por «${cleaned.take(12)}»",
+                        fontSize = 13.sp,
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            testing = true
+                            testMsg = null
+                            val problem = AiClient.keyProblem(cleaned)
+                            testMsg = if (problem != null) {
+                                "❌ $problem"
+                            } else {
+                                try {
+                                    AiClient.testKey(cleaned, model)
+                                    "✅ Clave correcta, la IA funciona."
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    "❌ ${e.message ?: e}"
+                                }
+                            }
+                            testing = false
+                        }
+                    },
+                    enabled = !testing && key.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (testing) "Probando…" else "Probar clave") }
+                testMsg?.let { Text(it, fontSize = 15.sp) }
                 OutlinedTextField(
                     value = model,
                     onValueChange = { model = it },

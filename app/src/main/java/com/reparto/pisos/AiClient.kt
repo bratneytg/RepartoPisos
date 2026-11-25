@@ -96,10 +96,25 @@ Recipients:
         return results to panel
     }
 
+    /** Quita espacios, saltos de línea, comillas y "Bearer" que se cuelan al copiar/pegar. */
+    fun cleanKey(raw: String): String =
+        raw.filter { it.code in 33..126 }.removePrefix("Bearer").trim('"', '\'')
+
+    /** Problema evidente de la clave antes de llamar a la API, o null si parece correcta. */
+    fun keyProblem(key: String): String? = when {
+        key.isEmpty() -> "Falta la clave."
+        key.startsWith("sk-ant-oat") ->
+            "Eso es un token de suscripción de Claude, no una clave de API. Crea una en console.anthropic.com → API keys (empieza por sk-ant-api03-)."
+        !key.startsWith("sk-ant-") ->
+            "No parece una clave de API de Anthropic: debe empezar por sk-ant-"
+        key.length < 40 -> "La clave parece incompleta (¿se cortó al copiarla?)."
+        else -> null
+    }
+
     private fun friendlyError(code: Int, body: String): String {
         val detail = Regex("\"message\"\\s*:\\s*\"([^\"]*)\"").find(body)?.groupValues?.get(1)
         val base = when (code) {
-            401 -> "Clave de API no válida"
+            401 -> "La API rechaza la clave. Hace falta una clave de API de console.anthropic.com copiada entera"
             403 -> "La clave no tiene permiso"
             404 -> "Modelo no encontrado (revisa el nombre en Ajustes)"
             429 -> "Demasiadas peticiones o sin saldo en la API"
@@ -109,29 +124,41 @@ Recipients:
         return if (detail.isNullOrBlank()) base else "$base: $detail"
     }
 
-    /** Llama a la API y devuelve el texto de la respuesta. */
-    suspend fun call(apiKey: String, model: String, jpegs: List<ByteArray>, prompt: String): String =
-        withContext(Dispatchers.IO) {
-            val content = JSONArray()
-            for (bytes in jpegs) {
-                content.put(
-                    JSONObject()
-                        .put("type", "image")
-                        .put(
-                            "source",
-                            JSONObject()
-                                .put("type", "base64")
-                                .put("media_type", "image/jpeg")
-                                .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)),
-                        ),
-                )
-            }
-            content.put(JSONObject().put("type", "text").put("text", prompt))
-            val body = JSONObject()
-                .put("model", model.trim())
-                .put("max_tokens", 8000)
-                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+    /** Prueba mínima de la clave: una petición de texto muy corta. Lanza IOException con el motivo si falla. */
+    suspend fun testKey(apiKey: String, model: String) {
+        val body = JSONObject()
+            .put("model", model.trim())
+            .put("max_tokens", 8)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "ok")))
+        send(apiKey, body)
+    }
 
+    /** Llama a la API con las fotos y devuelve el texto de la respuesta. */
+    suspend fun call(apiKey: String, model: String, jpegs: List<ByteArray>, prompt: String): String {
+        val content = JSONArray()
+        for (bytes in jpegs) {
+            content.put(
+                JSONObject()
+                    .put("type", "image")
+                    .put(
+                        "source",
+                        JSONObject()
+                            .put("type", "base64")
+                            .put("media_type", "image/jpeg")
+                            .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)),
+                    ),
+            )
+        }
+        content.put(JSONObject().put("type", "text").put("text", prompt))
+        val body = JSONObject()
+            .put("model", model.trim())
+            .put("max_tokens", 8000)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", content)))
+        return send(apiKey, body)
+    }
+
+    private suspend fun send(apiKey: String, body: JSONObject): String =
+        withContext(Dispatchers.IO) {
             val conn = URL("https://api.anthropic.com/v1/messages").openConnection() as HttpURLConnection
             try {
                 conn.requestMethod = "POST"
@@ -139,7 +166,7 @@ Recipients:
                 conn.readTimeout = 180_000
                 conn.doOutput = true
                 conn.setRequestProperty("content-type", "application/json")
-                conn.setRequestProperty("x-api-key", apiKey.trim())
+                conn.setRequestProperty("x-api-key", cleanKey(apiKey))
                 conn.setRequestProperty("anthropic-version", "2023-06-01")
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
 

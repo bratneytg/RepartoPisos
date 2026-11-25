@@ -42,4 +42,16 @@ class AiParseTest {
         assertTrue(prompt.contains("1. Juan Pérez"))
         assertTrue(prompt.contains("2. Ana López"))
     }
+
+    @Test
+    fun limpiaYValidaLaClave() {
+        val ok = "sk-ant-api03-" + "x".repeat(60)
+        assertEquals(ok, AiClient.cleanKey("  Bearer $ok \n"))
+        assertEquals(ok, AiClient.cleanKey("\"$ok\""))
+        assertEquals(null, AiClient.keyProblem(ok))
+        assertTrue(AiClient.keyProblem("sk-ant-oat01-" + "x".repeat(60))!!.contains("suscripción"))
+        assertTrue(AiClient.keyProblem("abc123")!!.contains("sk-ant-"))
+        assertTrue(AiClient.keyProblem("sk-ant-api03-corta")!!.contains("incompleta"))
+        assertTrue(AiClient.keyProblem("")!!.isNotEmpty())
+    }
 }
