@@ -13,6 +13,13 @@ Si hay varias personas con el mismo apellido, se usa la inicial/nombre que apare
 para elegir la correcta. Si no se puede decidir, el nombre sale en **REVISAR** con todos los pisos posibles.
 Todo lo dudoso lleva un aviso ⚠.
 
+## Guardar edificios
+
+Después de leer un timbre aparece **Guardar este edificio**: le pones un identificador (por ejemplo `Hauptstr. 12`)
+y se guarda en el móvil con todos los nombres y pisos. La próxima vez eliges el edificio en la lista y buscas
+directamente: **no hace falta foto, ni internet, ni clave de API**. «Releer con foto» actualiza un edificio guardado
+y «Borrar edificio» lo elimina.
+
 ## Dos formas de leer el timbre
 
 - **Con IA (recomendado):** en *Ajustes* pega tu clave de API de Anthropic. La foto y los nombres se envían

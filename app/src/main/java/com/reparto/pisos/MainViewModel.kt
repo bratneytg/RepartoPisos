@@ -25,6 +25,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = app.getSharedPreferences("reparto", Context.MODE_PRIVATE)
     private val imagesDir = File(app.cacheDir, "images").apply { mkdirs() }
+    private val store = BuildingStore(File(app.filesDir, "buildings.json"))
 
     // ---- datos de entrada (se guardan para no perderlos si Android cierra la app)
     var parcelsText by mutableStateOf(prefs.getString("text", "") ?: "")
@@ -43,6 +44,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var bottomFloor by mutableStateOf(prefs.getInt("bottomFloor", 0))
         private set
 
+    // ---- edificios guardados
+    var buildings by mutableStateOf(store.load())
+        private set
+    var selectedId by mutableStateOf(
+        prefs.getString("selected", null)?.takeIf { id -> buildings.any { it.id == id } },
+    )
+        private set
+    var saveNameDraft by mutableStateOf("")
+        private set
+
     // ---- estado de la búsqueda
     var loading by mutableStateOf(false)
         private set
@@ -58,6 +69,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var usedAi by mutableStateOf(false)
         private set
+    var sourceLabel by mutableStateOf("")
+        private set
+
+    /** El último resultado salió de leer fotos (y por tanto se puede guardar como edificio). */
+    var readFromPhotos by mutableStateOf(false)
+        private set
+    val canSave: Boolean get() = results != null && readFromPhotos && panel.isNotEmpty()
 
     init {
         (prefs.getString("photos", "") ?: "")
@@ -134,8 +152,65 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         savePhotos()
         results = null
         panel = emptyList()
+        readFromPhotos = false
         error = null
         notice = null
+    }
+
+    // ------------------------------------------------------ edificios
+
+    fun selectBuilding(id: String?) {
+        selectedId = id
+        prefs.edit().apply { if (id == null) remove("selected") else putString("selected", id) }.apply()
+        results = null
+        panel = emptyList()
+        readFromPhotos = false
+        error = null
+        notice = null
+    }
+
+    /** Vuelve al modo foto con el identificador ya puesto: al guardar, sustituye al edificio anterior. */
+    fun rereadSelected() {
+        val id = selectedId ?: return
+        selectBuilding(null)
+        saveNameDraft = id
+    }
+
+    fun saveBuilding(name: String): Boolean {
+        val id = name.trim()
+        if (id.isEmpty() || !canSave) return false
+        val building = Building(id, panel, System.currentTimeMillis(), usedAi)
+        val updated = (buildings.filter { !it.id.equals(id, ignoreCase = true) } + building)
+            .sortedBy { it.id.lowercase() }
+        try {
+            store.save(updated)
+        } catch (e: Exception) {
+            error = "No se pudo guardar el edificio: ${e.message ?: e}"
+            return false
+        }
+        buildings = updated
+        selectedId = id
+        prefs.edit().putString("selected", id).apply()
+        saveNameDraft = ""
+        readFromPhotos = false
+        sourceLabel = "Edificio guardado «$id»"
+        // Los datos ya están guardados: las fotos no hacen falta.
+        photos.toList().forEach { File(it).delete() }
+        photos.clear()
+        savePhotos()
+        return true
+    }
+
+    fun deleteBuilding(id: String) {
+        val updated = buildings.filter { it.id != id }
+        try {
+            store.save(updated)
+        } catch (e: Exception) {
+            error = "No se pudo borrar el edificio: ${e.message ?: e}"
+            return
+        }
+        buildings = updated
+        if (selectedId == id) selectBuilding(null)
     }
 
     fun saveSettings(key: String, model: String, useAi: Boolean, topIsHighest: Boolean, bottomFloor: Int) {
@@ -161,6 +236,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             error = "Escribe al menos un nombre."
             return
         }
+        val saved = buildings.firstOrNull { it.id == selectedId }
+        if (saved != null) {
+            // Edificio ya guardado: se busca con los datos locales, sin foto ni conexión.
+            error = null
+            notice = null
+            results = Matcher.matchAll(parcels, saved.entries)
+            panel = saved.entries
+            usedAi = false
+            readFromPhotos = false
+            sourceLabel = "Edificio guardado «${saved.id}»"
+            return
+        }
         if (photos.isEmpty()) {
             error = "Añade al menos una foto del timbre."
             return
@@ -182,6 +269,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         results = res
                         panel = entries
                         usedAi = true
+                        readFromPhotos = true
+                        sourceLabel = "Leído con IA"
                         return@launch
                     } catch (e: CancellationException) {
                         throw e
@@ -194,6 +283,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 results = res
                 panel = entries
                 usedAi = false
+                readFromPhotos = true
+                sourceLabel = "Leído en el móvil"
                 if (aiError != null) {
                     notice = "La IA no ha funcionado ($aiError). He usado la lectura local, que es menos fiable."
                 }

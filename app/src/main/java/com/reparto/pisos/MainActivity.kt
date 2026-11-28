@@ -34,6 +34,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -136,34 +138,37 @@ fun App(vm: MainViewModel = viewModel()) {
                 placeholder = { Text("2 Juan Pérez\nAna López\nHans Müller", fontSize = 22.sp, lineHeight = 30.sp) },
             )
 
-            // ---------------- 2. fotos
-            SectionTitle("2. Foto del timbre")
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(
-                    onClick = { camera.launch(vm.prepareCameraUri()) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(60.dp),
-                    enabled = vm.photos.size < MainViewModel.MAX_PHOTOS,
-                ) { Text("📷 Hacer foto", fontSize = 18.sp) }
-                OutlinedButton(
-                    onClick = {
-                        gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(60.dp),
-                    enabled = vm.photos.size < MainViewModel.MAX_PHOTOS,
-                ) { Text("🖼 Galería", fontSize = 18.sp) }
-            }
-            if (vm.photos.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    vm.photos.toList().forEach { path -> Thumb(path) { vm.removePhoto(path) } }
+            // ---------------- 2. edificio / fotos
+            SectionTitle("2. Edificio")
+            BuildingPicker(vm)
+            if (vm.selectedId == null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { camera.launch(vm.prepareCameraUri()) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(60.dp),
+                        enabled = vm.photos.size < MainViewModel.MAX_PHOTOS,
+                    ) { Text("📷 Hacer foto", fontSize = 18.sp) }
+                    OutlinedButton(
+                        onClick = {
+                            gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(60.dp),
+                        enabled = vm.photos.size < MainViewModel.MAX_PHOTOS,
+                    ) { Text("🖼 Galería", fontSize = 18.sp) }
                 }
-                Text("Puedes añadir varias fotos si el timbre es grande.", fontSize = 14.sp)
+                if (vm.photos.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        vm.photos.toList().forEach { path -> Thumb(path) { vm.removePhoto(path) } }
+                    }
+                    Text("Puedes añadir varias fotos si el timbre es grande.", fontSize = 14.sp)
+                }
             }
 
             // ---------------- 3. buscar
@@ -180,7 +185,7 @@ fun App(vm: MainViewModel = viewModel()) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 Text(vm.status, fontSize = 16.sp)
             }
-            if (vm.apiKey.isBlank() && !vm.loading && vm.results == null) {
+            if (vm.apiKey.isBlank() && !vm.loading && vm.results == null && vm.selectedId == null) {
                 Text(
                     "Consejo: pon tu clave de API en Ajustes para leer el timbre con IA. " +
                         "Sin clave uso la lectura del móvil, que falla más si el timbre es raro.",
@@ -196,7 +201,7 @@ fun App(vm: MainViewModel = viewModel()) {
                 ResultsView(
                     results = res,
                     panel = vm.panel,
-                    usedAi = vm.usedAi,
+                    sourceLabel = vm.sourceLabel,
                     onCopy = { text ->
                         clipboard.setText(AnnotatedString(text))
                         Toast.makeText(context, "Copiado", Toast.LENGTH_SHORT).show()
@@ -209,6 +214,12 @@ fun App(vm: MainViewModel = viewModel()) {
                         context.startActivity(Intent.createChooser(send, "Compartir"))
                     },
                 )
+            }
+
+            if (vm.canSave) {
+                SaveBuildingCard(vm) { id ->
+                    Toast.makeText(context, "Edificio «$id» guardado", Toast.LENGTH_SHORT).show()
+                }
             }
 
             if (vm.parcelsText.isNotBlank() || vm.photos.isNotEmpty()) {
@@ -264,7 +275,7 @@ fun Thumb(path: String, onRemove: () -> Unit) {
 fun ResultsView(
     results: List<ParcelResult>,
     panel: List<PanelEntry>,
-    usedAi: Boolean,
+    sourceLabel: String,
     onCopy: (String) -> Unit,
     onShare: (String) -> Unit,
 ) {
@@ -276,7 +287,7 @@ fun ResultsView(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionTitle("Resultado")
         Text(
-            (if (usedAi) "Leído con IA" else "Leído en el móvil") +
+            sourceLabel +
                 " · ${results.count { it.status == Status.OK }} seguros de ${results.size}",
             fontSize = 15.sp,
         )
@@ -339,6 +350,121 @@ fun GroupCard(title: String, items: List<ParcelResult>, container: Color, conten
                     }
                 }
             }
+        }
+    }
+}
+
+// ============================================================ edificios
+
+@Composable
+fun BuildingPicker(vm: MainViewModel) {
+    var expanded by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val selected = vm.buildings.firstOrNull { it.id == vm.selectedId }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp),
+        ) {
+            Text(
+                if (selected != null) "🏢 ${selected.id}  ▾" else "📷 Edificio nuevo (leer foto)  ▾",
+                fontSize = 18.sp,
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("📷 Edificio nuevo (leer foto)", fontSize = 18.sp) },
+                onClick = {
+                    vm.selectBuilding(null)
+                    expanded = false
+                },
+            )
+            vm.buildings.forEach { b ->
+                DropdownMenuItem(
+                    text = { Text("🏢 ${b.id} · ${b.entries.size} nombres", fontSize = 18.sp) },
+                    onClick = {
+                        vm.selectBuilding(b.id)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+
+    if (selected != null) {
+        val date = remember(selected.savedAt) {
+            java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date(selected.savedAt))
+        }
+        Text("Guardado el $date · ${selected.entries.size} nombres · funciona sin internet ni IA", fontSize = 15.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = vm::rereadSelected) { Text("Releer con foto") }
+            TextButton(onClick = { confirmDelete = true }) { Text("Borrar edificio") }
+        }
+    } else if (vm.buildings.isEmpty()) {
+        Text(
+            "Cuando leas un edificio podrás guardarlo con un nombre y no tendrás que volver a hacer la foto.",
+            fontSize = 14.sp,
+        )
+    }
+
+    if (confirmDelete && selected != null) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.deleteBuilding(selected.id)
+                    confirmDelete = false
+                }) { Text("Borrar") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") } },
+            title = { Text("¿Borrar «${selected.id}»?") },
+            text = { Text("Tendrás que volver a leer el timbre con una foto.") },
+        )
+    }
+}
+
+@Composable
+fun SaveBuildingCard(vm: MainViewModel, onSaved: (String) -> Unit) {
+    var name by remember(vm.saveNameDraft) { mutableStateOf(vm.saveNameDraft) }
+    val exists = vm.buildings.any { it.id.equals(name.trim(), ignoreCase = true) }
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Guardar este edificio", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "La próxima vez eliges el edificio y no hace falta foto ni internet.",
+                fontSize = 15.sp,
+            )
+            if (vm.panel.any { it.guessed || it.floor == null }) {
+                Text(
+                    "⚠ Algunos pisos son estimados o desconocidos. Revisa «Ver lo que he leído del timbre» antes de guardar.",
+                    fontSize = 14.sp,
+                )
+            }
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Identificador (p. ej. Hauptstr. 12)") },
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 20.sp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = { if (vm.saveBuilding(name)) onSaved(name.trim()) },
+                enabled = name.isNotBlank(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+            ) { Text(if (exists) "Actualizar edificio" else "Guardar edificio", fontSize = 18.sp) }
         }
     }
 }
